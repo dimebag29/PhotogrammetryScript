@@ -19,10 +19,7 @@ input_path = r""
 output_path = r""
 os.makedirs(output_path, exist_ok=True)
 
-# ADE20KクラスID 2:空, 12:人, 20:車
-mask_class_ids = [2, 12, 20]
-
-# 塗りつぶし色 (R, G, B)
+# # ADE20KクラスID 2:空, 12:人, 20:車、 塗りつぶし色 (R, G, B)
 fill_colors = {
     2: (0, 255, 255),    # Cyan
     12: (255, 0, 255),   # Magenta
@@ -112,3 +109,4 @@ for idx, filename in enumerate(file_list, start=1):
     print(f"[{idx}/{total_files}] {filename} 保存しました")
     print(f"  残り {remaining_to_process - processed_count} 枚")
     print(f"  終了予定時刻: {finish_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+
