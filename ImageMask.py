@@ -19,14 +19,13 @@ input_path = r""
 output_path = r""
 os.makedirs(output_path, exist_ok=True)
 
-# # ADE20KクラスID 2:空, 12:人, 20:車、 塗りつぶし色 (R, G, B)
+# ADE20KクラスID 2:空, 12:人, 20:車 → (R, G, B, A)
 fill_colors = {
-    2: (0, 255, 255),    # Cyan
-    12: (255, 0, 255),   # Magenta
-    20: (255, 255, 0),   # Yellow
+     2: ( 67, 148, 240, 255),
+    12: (  0,   0,   0,   0)
 }
 
-tile_size = 512  # SegFormerモデルの学習解像度
+tile_size = 512  # SegFormerの学習解像度
 
 # === モデル読み込み ===
 feature_extractor = SegformerFeatureExtractor.from_pretrained("nvidia/segformer-b2-finetuned-ade-512-512")
@@ -40,7 +39,8 @@ model.to(device)
 
 use_fp16 = False  # GTX1080では無効
 
-# === マスク処理 ===
+
+# === マスク処理関数（RGBA対応） ===
 def process_tile(tile_img):
     inputs = feature_extractor(images=tile_img, return_tensors="pt").to(device)
     if use_fp16 and device.type == "cuda":
@@ -51,22 +51,27 @@ def process_tile(tile_img):
         logits = outputs.logits
         pred = logits.argmax(dim=1)[0].cpu().numpy()
 
+    # SegFormer 出力マスク
     mask = Image.fromarray(pred.astype(np.uint8)).resize(tile_img.size, resample=Image.NEAREST)
     mask = np.array(mask)
 
-    # RGB画像をnumpy配列に
-    tile_np = np.array(tile_img.convert("RGB"))
+    # タイル画像を RGBA に変換
+    tile_np = np.array(tile_img.convert("RGBA"))
 
-    # 各クラスごとに塗りつぶし処理
-    for class_id, color in fill_colors.items():
+    # === 指定クラスを塗りつぶし（RGBA対応） ===
+    for class_id, color_rgba in fill_colors.items():
         class_mask = (mask == class_id)
-        # 1px膨張処理
+
+        # 1px 膨張
         class_mask_dilated = binary_dilation(class_mask, structure=np.ones((3, 3)))
-        tile_np[class_mask_dilated] = color
+
+        r, g, b, a = color_rgba
+        tile_np[class_mask_dilated] = [r, g, b, a]
 
     return Image.fromarray(tile_np)
 
-# === ファイル処理 ===
+
+# === 入出力処理 ===
 file_list = [f for f in os.listdir(input_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
 total_files = len(file_list)
 start_time = None
@@ -87,18 +92,27 @@ for idx, filename in enumerate(file_list, start=1):
     img_path = os.path.join(input_path, filename)
     image = Image.open(img_path).convert("RGB")
     width, height = image.size
-    result_img = Image.new("RGB", (width, height))
 
-    # タイルごとに処理
-    for top in range(0, height, tile_size):
+    # 出力画像を RGBA で作成
+    result_img = Image.new("RGBA", (width, height))
+
+    # === タイル処理（下から上へ）===
+
+    # top のリストを作成して逆順に
+    top_positions = list(range(0, height, tile_size))
+    top_positions.reverse()  # 下 → 上
+
+    for top in top_positions:
         for left in range(0, width, tile_size):
             right = min(left + tile_size, width)
             bottom = min(top + tile_size, height)
             tile = image.crop((left, top, right, bottom))
+
             processed_tile = process_tile(tile)
             result_img.paste(processed_tile, (left, top))
 
-    result_img.save(output_img_path)
+    # PNGで RGBA 保存
+    result_img.save(output_img_path, compress_level=1)
 
     processed_count += 1
     elapsed = time.time() - start_time
@@ -109,4 +123,5 @@ for idx, filename in enumerate(file_list, start=1):
     print(f"[{idx}/{total_files}] {filename} 保存しました")
     print(f"  残り {remaining_to_process - processed_count} 枚")
     print(f"  終了予定時刻: {finish_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+
 
