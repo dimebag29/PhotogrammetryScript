@@ -5,9 +5,10 @@ from natsort import natsorted  # pip install natsort
 
 # === 設定 ===
 input_folder = r""
-output_video = r""
-video_length = 299  # 動画の長さ（秒）
-fps = 30  # 出力動画のフレームレート
+total_frames = 9531  # 動画の総フレーム数
+fps = 29.97  # 出力動画のフレームレート
+
+output_video = input_folder + ".mp4"
 
 # === 画像ファイル一覧 ===
 images = [f for f in os.listdir(input_folder) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
@@ -19,9 +20,6 @@ if not images:
 # 最初の画像からサイズを取得
 first_img = cv2.imread(os.path.join(input_folder, images[0]))
 height, width, _ = first_img.shape
-
-# 動画の総フレーム数
-total_frames = video_length * fps
 
 # 画像を等間隔で割り当て
 frame_indices = [int(i * len(images) / total_frames) for i in range(total_frames)]
