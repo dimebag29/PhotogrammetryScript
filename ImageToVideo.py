@@ -36,7 +36,7 @@ for i, img_name in enumerate(images):
     print(f"画像読み込み完了: {i+1} / {total_frames} 枚")
 
 # === 動画作成 ===
-fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+fourcc = cv2.VideoWriter_fourcc(*"avc1")
 out = cv2.VideoWriter(input_folder + ".mp4", fourcc, fps, (width, height))
 
 print("動画作成を開始します...")
