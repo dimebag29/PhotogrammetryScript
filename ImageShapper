@@ -1,0 +1,153 @@
+# CUDA 12.8, torch 2.9.0+cu128, torchaudio 2.9.0+cu128, torchvision 0.24.0+cu128
+# pip install realesrgan==0.3.0
+# pip install git+https://github.com/XPixelGroup/BasicSR.git
+import os
+import cv2
+import numpy as np
+from PIL import Image
+from realesrgan import RealESRGANer
+from basicsr.archs.rrdbnet_arch import RRDBNet
+
+#==================================================
+# 入出力フォルダ
+#==================================================
+
+INPUT_DIR  = r""
+OUTPUT_DIR = r""
+
+# https://github.com/xinntao/Real-ESRGAN/releases?utm_source=chatgpt.com
+# からRealESRGAN_x4plus.pthをDL
+MODEL_PATH = r"RealESRGAN_x4plus.pth"
+
+#==================================================
+# RealESRGAN設定
+#==================================================
+
+# Tileサイズ
+# 大きいほど高速だがVRAM消費増加
+# RTX3060～4070なら512推奨
+TILE = 512
+
+# タイル境界の継ぎ目防止用オーバーラップ
+TILE_PAD = 32
+
+# 推論前余白
+PRE_PAD = 0
+
+# FP16推論
+USE_FP16 = True
+
+#==================================================
+# 出力設定
+#==================================================
+
+# x4後に元サイズへ戻す
+KEEP_ORIGINAL_SIZE = True
+
+#==================================================
+# シャープ化設定
+#==================================================
+
+ENABLE_UNSHARP_MASK = True
+
+# 0.3弱 / 0.6おすすめ / 1.0強
+UNSHARP_STRENGTH = 1.0
+
+# 文字・細線のみ強化
+TEXT_ONLY_SHARPEN = True
+
+# エッジ判定閾値
+EDGE_THRESHOLD = 25
+
+#==================================================
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+Image.MAX_IMAGE_PIXELS = None
+
+model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+
+upsampler = RealESRGANer(
+    scale=4,
+    model_path=MODEL_PATH,
+    model=model,
+    tile=TILE,
+    tile_pad=TILE_PAD,
+    pre_pad=PRE_PAD,
+    half=USE_FP16
+)
+
+def unsharp_mask(img, strength=0.5, text_only=False, edge_threshold=25):
+
+    blurred = cv2.GaussianBlur(img, (0,0), 2.0)
+    sharpened = cv2.addWeighted(img, 1.0 + strength, blurred, -strength, 0)
+    sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
+
+    if not text_only: return sharpened
+
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    lap = cv2.Laplacian(gray, cv2.CV_32F, ksize=3)
+
+    mask = np.abs(lap) > edge_threshold
+    mask = cv2.GaussianBlur(mask.astype(np.float32), (0,0), 1.5)
+    mask = mask[:,:,None]
+
+    output = img.astype(np.float32)*(1-mask) + sharpened.astype(np.float32)*mask
+    return np.clip(output, 0, 255).astype(np.uint8)
+
+def process_image(input_path, output_path):
+
+    print("Processing:", input_path)
+
+    img = cv2.imread(input_path, cv2.IMREAD_UNCHANGED)
+
+    if img is None:
+        print("Failed:", input_path)
+        return
+
+    original_h, original_w = img.shape[:2]
+
+    has_alpha = len(img.shape)==3 and img.shape[2]==4
+
+    if has_alpha:
+        alpha = img[:,:,3]
+        rgb = img[:,:,:3]
+    else:
+        rgb = img
+
+    rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+
+    output,_ = upsampler.enhance(rgb, outscale=4)
+
+    if KEEP_ORIGINAL_SIZE:
+        output = cv2.resize(output, (original_w, original_h), interpolation=cv2.INTER_LANCZOS4)
+
+    if ENABLE_UNSHARP_MASK:
+        output = unsharp_mask(output, strength=UNSHARP_STRENGTH, text_only=TEXT_ONLY_SHARPEN, edge_threshold=EDGE_THRESHOLD)
+
+    output = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
+
+    if has_alpha:
+        alpha_resized = cv2.resize(alpha, (output.shape[1], output.shape[0]), interpolation=cv2.INTER_LINEAR)
+        output = np.dstack((output, alpha_resized))
+
+    cv2.imwrite(output_path, output)
+
+    print("Saved:", output_path)
+
+extensions = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
+
+for filename in os.listdir(INPUT_DIR):
+
+    if not filename.lower().endswith(extensions): continue
+
+    input_path = os.path.join(INPUT_DIR, filename)
+    output_path = os.path.join(OUTPUT_DIR, filename)
+
+    try:
+        process_image(input_path, output_path)
+
+    except Exception as e:
+        print("Error:", filename)
+        print(e)
+
+print("Done")
